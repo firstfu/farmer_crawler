@@ -1,0 +1,57 @@
+{{/*
+  web/templates/partials/spread_table.html
+  農產品價差雷達系統 — 價差排名表 HTML 片段
+  以表格形式呈現各市場與基準市場的價差比較
+  欄位：排名、市場名稱、均價、絕對價差、溢價百分比、交易量
+  正價差以綠色顯示，負價差以紅色顯示
+  前三名以獎牌圖示標示
+  可透過 HTMX 局部替換更新
+*/}}
+{{define "spread_table"}}
+<div class="overflow-x-auto">
+    <table class="w-full bg-white rounded-xl shadow">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">排名</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">市場</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">均價</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">價差</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">溢價%</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">交易量</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {{range $i, $s := .Spreads}}
+            <tr class="hover:bg-gray-50 transition">
+                <td class="px-4 py-3 text-sm">
+                    {{if eq $i 0}}&#x1F947;{{else if eq $i 1}}&#x1F948;{{else if eq $i 2}}&#x1F949;{{else}}{{add $i 1}}{{end}}
+                </td>
+                <td class="px-4 py-3 text-sm font-medium text-gray-800">{{$s.TargetMarket}}</td>
+                <td class="px-4 py-3 text-sm text-right">{{sprintf "%.1f" $s.TargetAvgPrice}}</td>
+                <td class="px-4 py-3 text-sm text-right
+                    {{if gt $s.AbsoluteSpread 0.0}}text-green-600{{else}}text-red-600{{end}}">
+                    {{if gt $s.AbsoluteSpread 0.0}}+{{end}}{{sprintf "%.1f" $s.AbsoluteSpread}}
+                </td>
+                <td class="px-4 py-3 text-sm text-right font-semibold
+                    {{if gt $s.SpreadPercent 0.0}}text-green-600{{else}}text-red-600{{end}}">
+                    {{if gt $s.SpreadPercent 0.0}}+{{end}}{{sprintf "%.1f" $s.SpreadPercent}}%
+                </td>
+                <td class="px-4 py-3 text-sm text-right text-gray-500">{{sprintf "%.0f" $s.TargetVolume}}</td>
+            </tr>
+            {{end}}
+            {{if not .Spreads}}
+            <tr>
+                <td colspan="6" class="px-4 py-8 text-center text-gray-400">
+                    尚無價差資料
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    {{if .Spreads}}
+    <p class="text-xs text-gray-400 mt-2">
+        基準市場：{{.BaseMarketName}}（均價 {{sprintf "%.1f" (index .Spreads 0).BaseAvgPrice}} 元/公斤）
+    </p>
+    {{end}}
+</div>
+{{end}}

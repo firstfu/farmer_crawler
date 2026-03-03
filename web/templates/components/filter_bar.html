@@ -1,0 +1,28 @@
+{{/*
+  web/templates/components/filter_bar.html
+  農產品價差雷達系統 — 作物篩選列元件
+  以圓角按鈕形式呈現可選的作物代碼（SQ1 帶殼、SQ3 去殼）
+  使用 HTMX 屬性實現無刷新切換：
+    - hx-get: 請求對應作物的價差資料
+    - hx-target: 更新 #spread-table 區域
+    - hx-push-url: 同步更新瀏覽器網址列
+  當前選中的作物以綠色實心按鈕標示
+*/}}
+{{define "filter_bar"}}
+<div class="flex gap-2 flex-wrap">
+    {{range .CropCodes}}
+    <button hx-get="/api/spread?crop={{.}}"
+            hx-target="#spread-table"
+            hx-swap="innerHTML"
+            hx-push-url="?crop={{.}}"
+            class="px-4 py-2 rounded-full text-sm font-medium transition
+                {{if eq . $.CropCode}}
+                bg-green-600 text-white shadow
+                {{else}}
+                bg-white text-gray-600 border border-gray-300 hover:bg-green-50
+                {{end}}">
+        {{if eq . "SQ1"}}帶殼{{else if eq . "SQ3"}}去殼{{else}}{{.}}{{end}}
+    </button>
+    {{end}}
+</div>
+{{end}}

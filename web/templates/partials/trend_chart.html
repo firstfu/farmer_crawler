@@ -1,0 +1,75 @@
+{{/*
+  web/templates/partials/trend_chart.html
+  農產品價差雷達系統 — 趨勢圖 HTML 片段
+  使用 ECharts 繪製近 30 日均價趨勢折線圖與交易量長條圖
+  透過 fetch API 從 /api/trend 端點取得 JSON 資料
+  支援雙 Y 軸：左側為均價（元/公斤），右側為交易量（公斤）
+  自動偵測視窗大小變化並重繪圖表
+*/}}
+{{define "trend_chart"}}
+<div class="bg-white rounded-xl shadow p-4">
+    <div id="trend-chart" style="height: 400px;"></div>
+</div>
+
+<script>
+(function() {
+    const chartDom = document.getElementById('trend-chart');
+    const chart = echarts.init(chartDom);
+
+    const defaultMarkets = '{{.BaseMarketCode}}';
+    const cropCode = '{{.CropCode}}';
+
+    fetch('/api/trend?crop=' + cropCode + '&days=30&market=' + defaultMarkets)
+        .then(r => r.json())
+        .then(data => {
+            if (!data || data.length === 0) {
+                chartDom.innerHTML = '<p class="text-center text-gray-400 py-16">尚無趨勢資料</p>';
+                return;
+            }
+
+            const series = [];
+            const legendData = [];
+
+            data.forEach((market, idx) => {
+                legendData.push(market.market_name);
+
+                series.push({
+                    name: market.market_name,
+                    type: 'line',
+                    yAxisIndex: 0,
+                    smooth: true,
+                    data: market.points.map(p => [p.date, p.avg_price]),
+                });
+
+                if (idx === 0) {
+                    series.push({
+                        name: market.market_name + ' 交易量',
+                        type: 'bar',
+                        yAxisIndex: 1,
+                        barWidth: '40%',
+                        itemStyle: { opacity: 0.3 },
+                        data: market.points.map(p => [p.date, p.volume]),
+                    });
+                }
+            });
+
+            chart.setOption({
+                tooltip: { trigger: 'axis' },
+                legend: { data: legendData, bottom: 0 },
+                grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+                xAxis: { type: 'category' },
+                yAxis: [
+                    { type: 'value', name: '均價 (元/公斤)', position: 'left' },
+                    { type: 'value', name: '交易量 (公斤)', position: 'right' },
+                ],
+                series: series,
+            });
+        })
+        .catch(err => {
+            chartDom.innerHTML = '<p class="text-center text-red-400 py-16">載入趨勢圖失敗</p>';
+        });
+
+    window.addEventListener('resize', () => chart.resize());
+})();
+</script>
+{{end}}

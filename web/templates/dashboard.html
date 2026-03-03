@@ -1,0 +1,44 @@
+{{/*
+  web/templates/dashboard.html
+  農產品價差雷達系統 — 主儀表板頁面
+  繼承 layout.html 主版面，定義 "content" block
+  包含：篩選列、手動爬取按鈕、市場卡片、價差排名表、趨勢圖
+  使用 HTMX 實現局部更新，無需整頁重新載入
+*/}}
+{{template "layout" .}}
+{{define "content"}}
+<div class="space-y-6">
+    {{template "filter_bar" .}}
+
+    <div class="flex justify-end">
+        <button hx-post="/api/crawl"
+                hx-target="#crawl-status"
+                hx-swap="innerHTML"
+                class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm transition">
+            手動爬取今日資料
+        </button>
+        <div id="crawl-status" class="ml-3 flex items-center"></div>
+    </div>
+
+    <section>
+        <h2 class="text-lg font-semibold text-gray-700 mb-3">各市場今日行情</h2>
+        <div id="market-cards">
+            {{template "market_cards" .}}
+        </div>
+    </section>
+
+    <section>
+        <h2 class="text-lg font-semibold text-gray-700 mb-3">
+            價差排名（基準：{{.BaseMarketName}}）
+        </h2>
+        <div id="spread-table">
+            {{template "spread_table" .}}
+        </div>
+    </section>
+
+    <section>
+        <h2 class="text-lg font-semibold text-gray-700 mb-3">近30日趨勢</h2>
+        {{template "trend_chart" .}}
+    </section>
+</div>
+{{end}}

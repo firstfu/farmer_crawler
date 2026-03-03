@@ -1,0 +1,38 @@
+{{/*
+  web/templates/partials/market_cards.html
+  農產品價差雷達系統 — 市場卡片 HTML 片段
+  以卡片形式呈現各市場今日交易行情
+  基準市場以藍色邊框標示，其餘市場以綠色邊框
+  顯示資訊：市場名稱、均價、交易量、價格區間（上價～下價）
+  可透過 HTMX 局部替換更新
+*/}}
+{{define "market_cards"}}
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    {{range .Records}}
+    <div class="bg-white rounded-xl shadow p-4 border-l-4
+        {{if eq .MarketCode $.BaseMarketCode}}border-blue-500{{else}}border-green-500{{end}}">
+        <div class="flex justify-between items-start">
+            <h3 class="font-semibold text-gray-800">{{.MarketName}}</h3>
+            {{if eq .MarketCode $.BaseMarketCode}}
+            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">基準</span>
+            {{end}}
+        </div>
+        <div class="mt-2">
+            <span class="text-2xl font-bold text-gray-900">{{sprintf "%.1f" .AvgPrice}}</span>
+            <span class="text-sm text-gray-500 ml-1">元/公斤</span>
+        </div>
+        <div class="mt-1 text-sm text-gray-500">
+            交易量：{{sprintf "%.0f" .Volume}} 公斤
+        </div>
+        <div class="mt-1 text-xs text-gray-400">
+            {{sprintf "%.1f" .LowerPrice}} ~ {{sprintf "%.1f" .UpperPrice}}
+        </div>
+    </div>
+    {{end}}
+    {{if not .Records}}
+    <div class="col-span-full text-center text-gray-400 py-8">
+        今日尚無交易資料，請先爬取資料
+    </div>
+    {{end}}
+</div>
+{{end}}
