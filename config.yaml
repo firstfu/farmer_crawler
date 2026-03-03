@@ -8,6 +8,12 @@ crawler:
   schedule: "0 10 * * *"
   retry_count: 3
   retry_interval: 30s
+  batch_days: 7
+  batch_delay: 2s
+  backfill_days: 30
+  backfill_on_start: true
+  rate_limit: 1        # 每秒最多 N 個請求
+  rate_burst: 3        # 突發容許量
 
 analyzer:
   base_market_code: 400
