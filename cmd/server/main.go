@@ -46,6 +46,10 @@ func main() {
 		cfg.Crawler.CropName,
 		cfg.Crawler.RetryCount,
 		cfg.Crawler.RetryInterval,
+		cfg.Crawler.BatchDays,
+		cfg.Crawler.BatchDelay,
+		cfg.Crawler.RateLimit,
+		cfg.Crawler.RateBurst,
 		repo,
 	)
 	analyzer := service.NewAnalyzerService(
@@ -55,7 +59,7 @@ func main() {
 	)
 
 	// 啟動排程器
-	sched, err := scheduler.NewScheduler(crawler)
+	sched, err := scheduler.NewScheduler(crawler, repo, cfg)
 	if err != nil {
 		log.Fatalf("建立排程器失敗: %v", err)
 	}
@@ -106,6 +110,10 @@ func runCrawlCommand(args []string) {
 		cfg.Crawler.CropName,
 		cfg.Crawler.RetryCount,
 		cfg.Crawler.RetryInterval,
+		cfg.Crawler.BatchDays,
+		cfg.Crawler.BatchDelay,
+		cfg.Crawler.RateLimit,
+		cfg.Crawler.RateBurst,
 		repo,
 	)
 

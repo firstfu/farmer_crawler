@@ -7,6 +7,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -238,6 +239,109 @@ func TestAPIRecordJSONMapping_StringMarketCode(t *testing.T) {
 	}
 }
 
+// TestParseMinguoDate 測試民國日期字串轉 time.Time
+func TestParseMinguoDate(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantYear  int
+		wantMonth time.Month
+		wantDay   int
+		wantErr   bool
+	}{
+		{"正常轉換 115.03.03", "115.03.03", 2026, 3, 3, false},
+		{"正常轉換 114.01.15", "114.01.15", 2025, 1, 15, false},
+		{"正常轉換 114.12.31", "114.12.31", 2025, 12, 31, false},
+		{"錯誤格式-缺少部分", "115.03", 0, 0, 0, true},
+		{"錯誤格式-非數字", "abc.03.03", 0, 0, 0, true},
+		{"錯誤格式-空字串", "", 0, 0, 0, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseMinguoDate(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("ParseMinguoDate(%q) 預期錯誤，但得到 %v", tc.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseMinguoDate(%q) 意外錯誤: %v", tc.input, err)
+			}
+			if got.Year() != tc.wantYear || got.Month() != tc.wantMonth || got.Day() != tc.wantDay {
+				t.Errorf("ParseMinguoDate(%q) = %v, 預期 %d-%d-%d", tc.input, got, tc.wantYear, tc.wantMonth, tc.wantDay)
+			}
+		})
+	}
+}
+
+// TestSplitDateRange 測試 21天/7天=3批
+func TestSplitDateRange(t *testing.T) {
+	// 115.01.01 ~ 115.01.21 = 21 天，batchDays=7 → 3 批
+	batches, err := SplitDateRange("115.01.01", "115.01.21", 7)
+	if err != nil {
+		t.Fatalf("SplitDateRange 失敗: %v", err)
+	}
+	if len(batches) != 3 {
+		t.Fatalf("預期 3 批，得到 %d 批", len(batches))
+	}
+	// 第 1 批: 01.01 ~ 01.07
+	if batches[0].From != "115.01.01" || batches[0].To != "115.01.07" {
+		t.Errorf("第 1 批預期 115.01.01~115.01.07，得到 %s~%s", batches[0].From, batches[0].To)
+	}
+	// 第 2 批: 01.08 ~ 01.14
+	if batches[1].From != "115.01.08" || batches[1].To != "115.01.14" {
+		t.Errorf("第 2 批預期 115.01.08~115.01.14，得到 %s~%s", batches[1].From, batches[1].To)
+	}
+	// 第 3 批: 01.15 ~ 01.21
+	if batches[2].From != "115.01.15" || batches[2].To != "115.01.21" {
+		t.Errorf("第 3 批預期 115.01.15~115.01.21，得到 %s~%s", batches[2].From, batches[2].To)
+	}
+}
+
+// TestSplitDateRange_SingleDay 測試單日=1批
+func TestSplitDateRange_SingleDay(t *testing.T) {
+	batches, err := SplitDateRange("115.03.03", "115.03.03", 7)
+	if err != nil {
+		t.Fatalf("SplitDateRange 失敗: %v", err)
+	}
+	if len(batches) != 1 {
+		t.Fatalf("預期 1 批，得到 %d 批", len(batches))
+	}
+	if batches[0].From != "115.03.03" || batches[0].To != "115.03.03" {
+		t.Errorf("預期 115.03.03~115.03.03，得到 %s~%s", batches[0].From, batches[0].To)
+	}
+}
+
+// TestSplitDateRange_EndBeforeStart 測試結束日期早於起始日期（錯誤案例）
+func TestSplitDateRange_EndBeforeStart(t *testing.T) {
+	_, err := SplitDateRange("115.03.10", "115.03.01", 7)
+	if err == nil {
+		t.Fatal("預期錯誤（結束日期早於起始日期），但未收到錯誤")
+	}
+}
+
+// TestSplitDateRange_NotExactMultiple 測試 10天/7天=2批（7+3）
+func TestSplitDateRange_NotExactMultiple(t *testing.T) {
+	// 115.02.01 ~ 115.02.10 = 10 天，batchDays=7 → 2 批 (7+3)
+	batches, err := SplitDateRange("115.02.01", "115.02.10", 7)
+	if err != nil {
+		t.Fatalf("SplitDateRange 失敗: %v", err)
+	}
+	if len(batches) != 2 {
+		t.Fatalf("預期 2 批，得到 %d 批", len(batches))
+	}
+	// 第 1 批: 02.01 ~ 02.07
+	if batches[0].From != "115.02.01" || batches[0].To != "115.02.07" {
+		t.Errorf("第 1 批預期 115.02.01~115.02.07，得到 %s~%s", batches[0].From, batches[0].To)
+	}
+	// 第 2 批: 02.08 ~ 02.10
+	if batches[1].From != "115.02.08" || batches[1].To != "115.02.10" {
+		t.Errorf("第 2 批預期 115.02.08~115.02.10，得到 %s~%s", batches[1].From, batches[1].To)
+	}
+}
+
 // containsString 輔助函式：檢查字串是否包含子字串
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
@@ -250,4 +354,90 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestBackoffDuration 測試指數退避計算
+func TestBackoffDuration(t *testing.T) {
+	svc := &CrawlerService{}
+
+	// attempt=0, base=30s → 30s + jitter(0~30s) → 30~60s
+	d0 := svc.backoffDuration(0, 30*time.Second)
+	if d0 < 30*time.Second || d0 > 60*time.Second {
+		t.Errorf("attempt=0 預期 30~60s，得到 %v", d0)
+	}
+
+	// attempt=1, base=30s → 60s + jitter(0~30s) → 60~90s
+	d1 := svc.backoffDuration(1, 30*time.Second)
+	if d1 < 60*time.Second || d1 > 90*time.Second {
+		t.Errorf("attempt=1 預期 60~90s，得到 %v", d1)
+	}
+
+	// attempt=2, base=30s → 120s + jitter(0~30s) → 120~150s
+	d2 := svc.backoffDuration(2, 30*time.Second)
+	if d2 < 120*time.Second || d2 > 150*time.Second {
+		t.Errorf("attempt=2 預期 120~150s，得到 %v", d2)
+	}
+}
+
+// TestBuildRequest 測試 HTTP 請求包含正確 Header
+func TestBuildRequest(t *testing.T) {
+	svc := &CrawlerService{
+		apiURL:   "https://data.moa.gov.tw/Service/OpenData/FromM/FarmTransData.aspx",
+		cropName: "茭白筍",
+	}
+
+	apiURL := svc.BuildAPIURL("115.03.01", "115.03.03")
+	req, err := svc.buildRequest(apiURL)
+	if err != nil {
+		t.Fatalf("buildRequest 失敗: %v", err)
+	}
+
+	ua := req.Header.Get("User-Agent")
+	if ua == "" {
+		t.Error("User-Agent 不應為空")
+	}
+	if !containsString(ua, "Mozilla") {
+		t.Errorf("User-Agent 應包含 Mozilla，得到: %s", ua)
+	}
+
+	al := req.Header.Get("Accept-Language")
+	if !containsString(al, "zh-TW") {
+		t.Errorf("Accept-Language 應包含 zh-TW，得到: %s", al)
+	}
+
+	ref := req.Header.Get("Referer")
+	if ref == "" {
+		t.Error("Referer 不應為空")
+	}
+}
+
+// TestClassifyHTTPError 測試 HTTP 錯誤碼分類
+func TestClassifyHTTPError(t *testing.T) {
+	tests := []struct {
+		statusCode    int
+		wantRetryable bool
+		wantCategory  string
+	}{
+		{429, true, "rate_limited"},
+		{403, false, "blocked"},
+		{500, true, "server_error"},
+		{502, true, "server_error"},
+		{503, true, "server_error"},
+		{408, true, "timeout"},
+		{400, false, "client_error"},
+		{404, false, "client_error"},
+		{200, false, "ok"},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("HTTP_%d", tc.statusCode), func(t *testing.T) {
+			retryable, category := classifyHTTPError(tc.statusCode)
+			if retryable != tc.wantRetryable {
+				t.Errorf("HTTP %d: retryable 預期 %v，得到 %v", tc.statusCode, tc.wantRetryable, retryable)
+			}
+			if category != tc.wantCategory {
+				t.Errorf("HTTP %d: category 預期 %q，得到 %q", tc.statusCode, tc.wantCategory, category)
+			}
+		})
+	}
 }
