@@ -1,75 +1,219 @@
 {{/*
   web/templates/partials/trend_chart.html
-  農產品價差雷達系統 — 趨勢圖 HTML 片段
+  農產品價差雷達系統 — 趨勢圖 HTML 片段（升級版）
   使用 ECharts 繪製近 30 日均價趨勢折線圖與交易量長條圖
-  透過 fetch API 從 /api/trend 端點取得 JSON 資料
-  支援雙 Y 軸：左側為均價（元/公斤），右側為交易量（公斤）
-  自動偵測視窗大小變化並重繪圖表
+  升級特色：
+    - 骨架屏載入動畫（skeleton）
+    - 折線加漸層面積填充 areaStyle
+    - 自訂 tooltip formatter（數字用 Fira Code）
+    - 新增 dataZoom 滑動控件
+    - 響應式圖表高度（手機 300px / 桌面 450px）
+    - 匯出 window.refreshTrendChart() 供篩選器呼叫
 */}}
 {{define "trend_chart"}}
-<div class="bg-white rounded-xl shadow p-4">
-    <div id="trend-chart" style="height: 400px;"></div>
+<div class="bg-white rounded-xl shadow-sm p-4">
+    <!-- 骨架屏載入 -->
+    <div id="trend-skeleton" class="space-y-4">
+        <div class="skeleton h-6 w-32"></div>
+        <div class="skeleton h-[300px] md:h-[450px] w-full rounded-lg"></div>
+    </div>
+    <div id="trend-chart" class="hidden" style="height: 300px;"></div>
 </div>
 
 <script>
 (function() {
-    const chartDom = document.getElementById('trend-chart');
-    const chart = echarts.init(chartDom);
+    var chartDom = document.getElementById('trend-chart');
+    var skeletonDom = document.getElementById('trend-skeleton');
+    var chart = echarts.init(chartDom);
 
-    const defaultMarkets = '{{.BaseMarketCode}}';
-    const cropCode = '{{.CropCode}}';
+    // 響應式高度
+    function updateChartHeight() {
+        var h = window.innerWidth < 768 ? 300 : 450;
+        chartDom.style.height = h + 'px';
+        chart.resize();
+    }
 
-    fetch('/api/trend?crop=' + cropCode + '&days=30&market=' + defaultMarkets)
-        .then(r => r.json())
-        .then(data => {
-            if (!data || data.length === 0) {
-                chartDom.innerHTML = '<p class="text-center text-gray-400 py-16">尚無趨勢資料</p>';
-                return;
-            }
+    // 漸層色彩池
+    var colorPalette = [
+        { line: '#3b82f6', area: ['rgba(59,130,246,0.3)', 'rgba(59,130,246,0.02)'] },
+        { line: '#10b981', area: ['rgba(16,185,129,0.3)', 'rgba(16,185,129,0.02)'] },
+        { line: '#f59e0b', area: ['rgba(245,158,11,0.3)', 'rgba(245,158,11,0.02)'] },
+        { line: '#ef4444', area: ['rgba(239,68,68,0.3)', 'rgba(239,68,68,0.02)'] },
+        { line: '#8b5cf6', area: ['rgba(139,92,246,0.3)', 'rgba(139,92,246,0.02)'] },
+    ];
 
-            const series = [];
-            const legendData = [];
+    var defaultMarkets = '{{.BaseMarketCode}}';
+    var cropCode = '{{.CropCode}}';
 
-            data.forEach((market, idx) => {
-                legendData.push(market.market_name);
+    function loadTrendChart(params) {
+        var url = '/api/trend?crop=' + (params.crop || cropCode);
 
-                series.push({
-                    name: market.market_name,
-                    type: 'line',
-                    yAxisIndex: 0,
-                    smooth: true,
-                    data: market.points.map(p => [p.date, p.avg_price]),
+        if (params.from && params.to) {
+            url += '&from=' + params.from + '&to=' + params.to;
+        } else {
+            url += '&days=' + (params.days || 30);
+        }
+
+        url += '&market=' + (params.markets || defaultMarkets);
+
+        // 顯示骨架屏
+        skeletonDom.classList.remove('hidden');
+        chartDom.classList.add('hidden');
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                // 隱藏骨架屏，顯示圖表
+                skeletonDom.classList.add('hidden');
+                chartDom.classList.remove('hidden');
+                updateChartHeight();
+
+                if (!data || data.length === 0) {
+                    chartDom.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-gray-400"><svg class="w-12 h-12 mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg><p>尚無趨勢資料</p></div>';
+                    return;
+                }
+
+                var series = [];
+                var legendData = [];
+
+                data.forEach(function(market, idx) {
+                    var colors = colorPalette[idx % colorPalette.length];
+                    legendData.push(market.market_name);
+
+                    // 均價折線 + 漸層面積
+                    series.push({
+                        name: market.market_name,
+                        type: 'line',
+                        yAxisIndex: 0,
+                        smooth: true,
+                        symbol: 'circle',
+                        symbolSize: 6,
+                        lineStyle: { width: 2.5, color: colors.line },
+                        itemStyle: { color: colors.line },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: colors.area[0] },
+                                { offset: 1, color: colors.area[1] }
+                            ])
+                        },
+                        data: market.points.map(function(p) { return [p.date, p.avg_price]; }),
+                    });
+
+                    // 第一個市場顯示交易量長條圖
+                    if (idx === 0) {
+                        series.push({
+                            name: market.market_name + ' 交易量',
+                            type: 'bar',
+                            yAxisIndex: 1,
+                            barWidth: '40%',
+                            itemStyle: {
+                                color: 'rgba(148,163,184,0.25)',
+                                borderRadius: [2, 2, 0, 0]
+                            },
+                            data: market.points.map(function(p) { return [p.date, p.volume]; }),
+                        });
+                    }
                 });
 
-                if (idx === 0) {
-                    series.push({
-                        name: market.market_name + ' 交易量',
-                        type: 'bar',
-                        yAxisIndex: 1,
-                        barWidth: '40%',
-                        itemStyle: { opacity: 0.3 },
-                        data: market.points.map(p => [p.date, p.volume]),
-                    });
-                }
+                chart.setOption({
+                    tooltip: {
+                        trigger: 'axis',
+                        backgroundColor: 'rgba(15,23,42,0.9)',
+                        borderColor: 'transparent',
+                        textStyle: {
+                            color: '#f1f5f9',
+                            fontFamily: 'Fira Code, monospace',
+                            fontSize: 12
+                        },
+                        formatter: function(params) {
+                            var date = params[0].axisValue;
+                            var html = '<div style="font-family:Noto Sans TC,sans-serif;font-weight:600;margin-bottom:6px">' + date + '</div>';
+                            params.forEach(function(p) {
+                                var value = typeof p.value === 'object' ? p.value[1] : p.value;
+                                var unit = p.seriesType === 'bar' ? ' 公斤' : ' 元/公斤';
+                                html += '<div style="display:flex;align-items:center;gap:6px;margin:3px 0">'
+                                    + '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + p.color + '"></span>'
+                                    + '<span style="font-family:Noto Sans TC,sans-serif">' + p.seriesName + '</span>'
+                                    + '<span style="font-family:Fira Code,monospace;font-weight:600;margin-left:auto">'
+                                    + (typeof value === 'number' ? value.toFixed(1) : value) + unit
+                                    + '</span></div>';
+                            });
+                            return html;
+                        }
+                    },
+                    legend: {
+                        data: legendData,
+                        bottom: 35,
+                        textStyle: { fontFamily: 'Noto Sans TC, sans-serif', fontSize: 12 }
+                    },
+                    grid: {
+                        left: '3%',
+                        right: '4%',
+                        bottom: 80,
+                        top: 20,
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        axisLabel: {
+                            fontFamily: 'Fira Code, monospace',
+                            fontSize: 11,
+                            color: '#94a3b8'
+                        },
+                        axisLine: { lineStyle: { color: '#e2e8f0' } },
+                        axisTick: { show: false }
+                    },
+                    yAxis: [
+                        {
+                            type: 'value',
+                            name: '均價 (元/公斤)',
+                            position: 'left',
+                            nameTextStyle: { fontFamily: 'Noto Sans TC, sans-serif', fontSize: 11, color: '#94a3b8' },
+                            axisLabel: { fontFamily: 'Fira Code, monospace', fontSize: 11, color: '#94a3b8' },
+                            splitLine: { lineStyle: { color: '#f1f5f9', type: 'dashed' } }
+                        },
+                        {
+                            type: 'value',
+                            name: '交易量 (公斤)',
+                            position: 'right',
+                            nameTextStyle: { fontFamily: 'Noto Sans TC, sans-serif', fontSize: 11, color: '#94a3b8' },
+                            axisLabel: { fontFamily: 'Fira Code, monospace', fontSize: 11, color: '#94a3b8' },
+                            splitLine: { show: false }
+                        },
+                    ],
+                    dataZoom: [
+                        {
+                            type: 'slider',
+                            bottom: 5,
+                            height: 20,
+                            borderColor: '#e2e8f0',
+                            fillerColor: 'rgba(59,130,246,0.1)',
+                            handleStyle: { color: '#3b82f6' },
+                            textStyle: { fontFamily: 'Fira Code, monospace', fontSize: 10 }
+                        }
+                    ],
+                    series: series,
+                }, true);
+            })
+            .catch(function() {
+                skeletonDom.classList.add('hidden');
+                chartDom.classList.remove('hidden');
+                chartDom.innerHTML = '<div class="flex flex-col items-center justify-center h-full text-red-400 py-16"><svg class="w-12 h-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg><p>載入趨勢圖失敗</p></div>';
             });
+    }
 
-            chart.setOption({
-                tooltip: { trigger: 'axis' },
-                legend: { data: legendData, bottom: 0 },
-                grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
-                xAxis: { type: 'category' },
-                yAxis: [
-                    { type: 'value', name: '均價 (元/公斤)', position: 'left' },
-                    { type: 'value', name: '交易量 (公斤)', position: 'right' },
-                ],
-                series: series,
-            });
-        })
-        .catch(err => {
-            chartDom.innerHTML = '<p class="text-center text-red-400 py-16">載入趨勢圖失敗</p>';
-        });
+    // 初始載入
+    loadTrendChart({ crop: cropCode, markets: defaultMarkets, days: 30 });
 
-    window.addEventListener('resize', () => chart.resize());
+    // 響應式
+    window.addEventListener('resize', function() {
+        updateChartHeight();
+    });
+
+    // 匯出刷新函式供篩選器呼叫
+    window.refreshTrendChart = function(params) {
+        loadTrendChart(params || { crop: cropCode, markets: defaultMarkets, days: 30 });
+    };
 })();
 </script>
 {{end}}

@@ -1,47 +1,76 @@
 {{/*
   web/templates/partials/spread_table.html
-  農產品價差雷達系統 — 價差排名表 HTML 片段
+  農產品價差雷達系統 — 價差排名表 HTML 片段（升級版）
   以表格形式呈現各市場與基準市場的價差比較
-  欄位：排名、市場名稱、均價、絕對價差、溢價百分比、交易量
-  正價差以綠色顯示，負價差以紅色顯示
-  前三名以獎牌圖示標示
+  升級特色：
+    - 表頭改 bg-brand-800 text-white
+    - 排名改圓形數字徽章（金/銀/銅色）取代 emoji
+    - 價差欄加 pill 背景色（bg-emerald-50 / bg-red-50）
+    - 手機版 md:hidden 改為卡片式列表
+    - 行 hover 高亮 row-highlight
+    - 數字使用 font-data（Fira Code）等寬對齊
   可透過 HTMX 局部替換更新
 */}}
 {{define "spread_table"}}
-<div class="overflow-x-auto">
-    <table class="w-full bg-white rounded-xl shadow">
-        <thead class="bg-gray-50">
+<!-- 桌面版表格 -->
+<div class="hidden md:block overflow-x-auto">
+    <table class="w-full bg-white rounded-xl shadow-sm overflow-hidden">
+        <thead class="bg-brand-800">
             <tr>
-                <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">排名</th>
-                <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">市場</th>
-                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">均價</th>
-                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">價差</th>
-                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">溢價%</th>
-                <th class="px-4 py-3 text-right text-sm font-medium text-gray-600">交易量</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-white">排名</th>
+                <th class="px-4 py-3 text-left text-sm font-medium text-white">市場</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-white">均價</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-white">價差</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-white">溢價%</th>
+                <th class="px-4 py-3 text-right text-sm font-medium text-white">交易量</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
             {{range $i, $s := .Spreads}}
-            <tr class="hover:bg-gray-50 transition">
+            <tr class="row-highlight">
+                <!-- 排名圓形徽章 -->
                 <td class="px-4 py-3 text-sm">
-                    {{if eq $i 0}}&#x1F947;{{else if eq $i 1}}&#x1F948;{{else if eq $i 2}}&#x1F949;{{else}}{{add $i 1}}{{end}}
+                    {{if eq $i 0}}
+                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-yellow-400 text-white text-xs font-bold shadow-sm">1</span>
+                    {{else if eq $i 1}}
+                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-300 text-white text-xs font-bold shadow-sm">2</span>
+                    {{else if eq $i 2}}
+                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-600 text-white text-xs font-bold shadow-sm">3</span>
+                    {{else}}
+                    <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-100 text-gray-500 text-xs font-medium">{{add $i 1}}</span>
+                    {{end}}
                 </td>
+
+                <!-- 市場名稱 -->
                 <td class="px-4 py-3 text-sm font-medium text-gray-800">{{$s.TargetMarket}}</td>
-                <td class="px-4 py-3 text-sm text-right">{{sprintf "%.1f" $s.TargetAvgPrice}}</td>
-                <td class="px-4 py-3 text-sm text-right
-                    {{if gt $s.AbsoluteSpread 0.0}}text-green-600{{else}}text-red-600{{end}}">
-                    {{if gt $s.AbsoluteSpread 0.0}}+{{end}}{{sprintf "%.1f" $s.AbsoluteSpread}}
+
+                <!-- 均價 -->
+                <td class="px-4 py-3 text-sm text-right font-data">{{sprintf "%.1f" $s.TargetAvgPrice}}</td>
+
+                <!-- 價差 pill -->
+                <td class="px-4 py-3 text-sm text-right">
+                    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold font-data
+                        {{if gt $s.AbsoluteSpread 0.0}}bg-emerald-50 text-emerald-700{{else}}bg-red-50 text-red-700{{end}}">
+                        {{if gt $s.AbsoluteSpread 0.0}}+{{end}}{{sprintf "%.1f" $s.AbsoluteSpread}}
+                    </span>
                 </td>
-                <td class="px-4 py-3 text-sm text-right font-semibold
-                    {{if gt $s.SpreadPercent 0.0}}text-green-600{{else}}text-red-600{{end}}">
+
+                <!-- 溢價百分比 -->
+                <td class="px-4 py-3 text-sm text-right font-semibold font-data
+                    {{if gt $s.SpreadPercent 0.0}}text-emerald-600{{else}}text-red-600{{end}}">
                     {{if gt $s.SpreadPercent 0.0}}+{{end}}{{sprintf "%.1f" $s.SpreadPercent}}%
                 </td>
-                <td class="px-4 py-3 text-sm text-right text-gray-500">{{sprintf "%.0f" $s.TargetVolume}}</td>
+
+                <!-- 交易量 -->
+                <td class="px-4 py-3 text-sm text-right text-gray-500 font-data">{{sprintf "%.0f" $s.TargetVolume}}</td>
             </tr>
             {{end}}
             {{if not .Spreads}}
             <tr>
-                <td colspan="6" class="px-4 py-8 text-center text-gray-400">
+                <td colspan="6" class="px-4 py-12 text-center text-gray-400">
+                    <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
                     尚無價差資料
                 </td>
             </tr>
@@ -49,8 +78,60 @@
         </tbody>
     </table>
     {{if .Spreads}}
+    <p class="text-xs text-gray-400 mt-2 px-1">
+        基準市場：{{.BaseMarketName}}（均價 <span class="font-data">{{sprintf "%.1f" (index .Spreads 0).BaseAvgPrice}}</span> 元/公斤）
+    </p>
+    {{end}}
+</div>
+
+<!-- 手機版卡片列表 -->
+<div class="md:hidden space-y-3">
+    {{range $i, $s := .Spreads}}
+    <div class="bg-white rounded-xl shadow-sm p-4 card-hover border-l-4
+        {{if gt $s.AbsoluteSpread 0.0}}border-emerald-500{{else}}border-red-500{{end}}">
+        <div class="flex justify-between items-start mb-2">
+            <div class="flex items-center gap-2">
+                {{if eq $i 0}}
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-yellow-400 text-white text-xs font-bold">1</span>
+                {{else if eq $i 1}}
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-300 text-white text-xs font-bold">2</span>
+                {{else if eq $i 2}}
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-600 text-white text-xs font-bold">3</span>
+                {{else}}
+                <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-500 text-xs font-medium">{{add $i 1}}</span>
+                {{end}}
+                <span class="font-medium text-gray-800">{{$s.TargetMarket}}</span>
+            </div>
+            <span class="font-bold font-data text-lg
+                {{if gt $s.SpreadPercent 0.0}}text-emerald-600{{else}}text-red-600{{end}}">
+                {{if gt $s.SpreadPercent 0.0}}+{{end}}{{sprintf "%.1f" $s.SpreadPercent}}%
+            </span>
+        </div>
+        <div class="flex justify-between text-sm text-gray-500">
+            <span>均價 <span class="font-data text-gray-700">{{sprintf "%.1f" $s.TargetAvgPrice}}</span></span>
+            <span>價差
+                <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold font-data
+                    {{if gt $s.AbsoluteSpread 0.0}}bg-emerald-50 text-emerald-700{{else}}bg-red-50 text-red-700{{end}}">
+                    {{if gt $s.AbsoluteSpread 0.0}}+{{end}}{{sprintf "%.1f" $s.AbsoluteSpread}}
+                </span>
+            </span>
+            <span>量 <span class="font-data">{{sprintf "%.0f" $s.TargetVolume}}</span></span>
+        </div>
+    </div>
+    {{end}}
+
+    {{if not .Spreads}}
+    <div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">
+        <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        尚無價差資料
+    </div>
+    {{end}}
+
+    {{if .Spreads}}
     <p class="text-xs text-gray-400 mt-2">
-        基準市場：{{.BaseMarketName}}（均價 {{sprintf "%.1f" (index .Spreads 0).BaseAvgPrice}} 元/公斤）
+        基準市場：{{.BaseMarketName}}（均價 <span class="font-data">{{sprintf "%.1f" (index .Spreads 0).BaseAvgPrice}}</span> 元/公斤）
     </p>
     {{end}}
 </div>

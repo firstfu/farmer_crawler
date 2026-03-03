@@ -1,28 +1,202 @@
 {{/*
   web/templates/components/filter_bar.html
-  農產品價差雷達系統 — 作物篩選列元件
-  以圓角按鈕形式呈現可選的作物代碼（SQ1 帶殼、SQ3 去殼）
-  使用 HTMX 屬性實現無刷新切換：
-    - hx-get: 請求對應作物的價差資料
-    - hx-target: 更新 #spread-table 區域
-    - hx-push-url: 同步更新瀏覽器網址列
-  當前選中的作物以綠色實心按鈕標示
+  農產品價差雷達系統 — 篩選工具列（升級版）
+  升級特色：
+    - 作物篩選改 Segmented Control 樣式（整頁 HTMX 替換 hx-target="body"）
+    - 新增市場多選下拉選擇器（checkbox dropdown + 全選/取消）
+    - 新增日期範圍選擇器（input[type=date]）
+    - 爬取按鈕移至此列，加 spinner loading
+    - JavaScript：西元轉民國、HTMX 多目標更新
 */}}
 {{define "filter_bar"}}
-<div class="flex gap-2 flex-wrap">
-    {{range .CropCodes}}
-    <button hx-get="/api/spread?crop={{.}}"
-            hx-target="#spread-table"
-            hx-swap="innerHTML"
-            hx-push-url="?crop={{.}}"
-            class="px-4 py-2 rounded-full text-sm font-medium transition
+<div class="bg-white rounded-xl shadow-sm p-4 space-y-4 animate-fade-in">
+    <!-- 第一列：作物切換 + 爬取按鈕 -->
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <!-- 作物 Segmented Control -->
+        <div class="flex bg-slate-100 rounded-lg p-1 gap-0.5">
+            {{range .CropCodes}}
+            <a href="/?crop={{.}}"
+               class="px-5 py-2 rounded-md text-sm font-medium transition-all
                 {{if eq . $.CropCode}}
-                bg-green-600 text-white shadow
+                bg-brand-800 text-white shadow-sm
                 {{else}}
-                bg-white text-gray-600 border border-gray-300 hover:bg-green-50
+                text-gray-600 hover:text-gray-800 hover:bg-slate-200
                 {{end}}">
-        {{if eq . "SQ1"}}帶殼{{else if eq . "SQ3"}}去殼{{else}}{{.}}{{end}}
-    </button>
-    {{end}}
+                {{if eq . "SQ1"}}帶殼{{else if eq . "SQ3"}}去殼{{else}}{{.}}{{end}}
+            </a>
+            {{end}}
+        </div>
+
+        <!-- 爬取按鈕 -->
+        <div class="flex items-center gap-3">
+            <div id="crawl-status" class="text-sm"></div>
+            <button id="crawl-btn"
+                    hx-post="/api/crawl"
+                    hx-target="#crawl-status"
+                    hx-swap="innerHTML"
+                    hx-indicator="#crawl-spinner"
+                    class="bg-cta-500 hover:bg-cta-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow flex items-center gap-2">
+                <!-- Spinner（預設隱藏） -->
+                <svg id="crawl-spinner" class="htmx-indicator animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                爬取今日資料
+            </button>
+        </div>
+    </div>
+
+    <!-- 第二列：市場選擇器 + 日期範圍 -->
+    <div class="flex flex-wrap items-end gap-4">
+        <!-- 市場多選下拉 -->
+        <div class="relative" id="market-dropdown-container">
+            <label class="block text-xs text-gray-500 font-medium mb-1">選擇市場</label>
+            <button type="button" id="market-dropdown-btn"
+                    onclick="toggleMarketDropdown()"
+                    class="flex items-center gap-2 bg-slate-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 hover:border-brand-400 transition min-w-[180px]">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                </svg>
+                <span id="market-btn-label">全部市場</span>
+                <svg class="w-4 h-4 text-gray-400 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>
+            </button>
+            <!-- 下拉選單 -->
+            <div id="market-dropdown" class="hidden absolute z-40 mt-1 w-64 bg-white rounded-xl shadow-lg border border-gray-100 py-2 max-h-64 overflow-y-auto">
+                <!-- 全選/取消 -->
+                <div class="px-3 py-2 border-b border-gray-100 flex gap-2">
+                    <button type="button" onclick="selectAllMarkets()" class="text-xs text-brand-600 hover:text-brand-800 font-medium">全選</button>
+                    <span class="text-gray-300">|</span>
+                    <button type="button" onclick="deselectAllMarkets()" class="text-xs text-gray-500 hover:text-gray-700 font-medium">取消全選</button>
+                </div>
+                {{range .AllMarkets}}
+                <label class="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-sm">
+                    <input type="checkbox" class="market-cb rounded text-brand-600 border-gray-300"
+                           value="{{.Code}}" {{if index_map $.SelectedMarketsMap .Code}}checked{{end}}>
+                    <span>{{.Name}}</span>
+                    <span class="text-xs text-gray-400 ml-auto font-data">{{.Code}}</span>
+                </label>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- 日期範圍選擇器 -->
+        <div class="flex items-end gap-2">
+            <div>
+                <label class="block text-xs text-gray-500 font-medium mb-1">起始日期</label>
+                <input type="date" id="date-from" value=""
+                       class="bg-slate-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 hover:border-brand-400 transition font-data">
+            </div>
+            <span class="text-gray-400 pb-2">~</span>
+            <div>
+                <label class="block text-xs text-gray-500 font-medium mb-1">結束日期</label>
+                <input type="date" id="date-to" value=""
+                       class="bg-slate-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 hover:border-brand-400 transition font-data">
+            </div>
+        </div>
+
+        <!-- 套用篩選按鈕 -->
+        <button type="button" onclick="applyFilters()"
+                class="bg-brand-800 hover:bg-brand-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+            </svg>
+            套用篩選
+        </button>
+    </div>
 </div>
+
+<script>
+// 市場下拉選單開關
+function toggleMarketDropdown() {
+    var dd = document.getElementById('market-dropdown');
+    dd.classList.toggle('hidden');
+}
+
+// 點擊外部關閉下拉
+document.addEventListener('click', function(e) {
+    var container = document.getElementById('market-dropdown-container');
+    if (container && !container.contains(e.target)) {
+        document.getElementById('market-dropdown').classList.add('hidden');
+    }
+});
+
+// 全選市場
+function selectAllMarkets() {
+    document.querySelectorAll('.market-cb').forEach(function(cb) { cb.checked = true; });
+    updateMarketLabel();
+}
+
+// 取消全選
+function deselectAllMarkets() {
+    document.querySelectorAll('.market-cb').forEach(function(cb) { cb.checked = false; });
+    updateMarketLabel();
+}
+
+// 更新按鈕標籤
+function updateMarketLabel() {
+    var checked = document.querySelectorAll('.market-cb:checked');
+    var total = document.querySelectorAll('.market-cb');
+    var label = document.getElementById('market-btn-label');
+    if (checked.length === 0) {
+        label.textContent = '請選擇市場';
+    } else if (checked.length === total.length) {
+        label.textContent = '全部市場';
+    } else {
+        label.textContent = '已選 ' + checked.length + ' 個市場';
+    }
+}
+
+// 監聽 checkbox 變更
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('market-cb')) {
+        updateMarketLabel();
+    }
+});
+
+// 西元日期轉民國日期（YYYY-MM-DD → YYY.MM.DD）
+function toMinguoDate(dateStr) {
+    if (!dateStr) return '';
+    var parts = dateStr.split('-');
+    var year = parseInt(parts[0]) - 1911;
+    return year + '.' + parts[1] + '.' + parts[2];
+}
+
+// 取得已選市場代碼
+function getSelectedMarkets() {
+    var checked = document.querySelectorAll('.market-cb:checked');
+    var codes = [];
+    checked.forEach(function(cb) { codes.push(cb.value); });
+    return codes.join(',');
+}
+
+// 套用篩選
+function applyFilters() {
+    var markets = getSelectedMarkets();
+    var fromDate = toMinguoDate(document.getElementById('date-from').value);
+    var toDate = toMinguoDate(document.getElementById('date-to').value);
+    var cropCode = '{{.CropCode}}';
+
+    // 更新市場卡片
+    var marketsParam = markets ? '&markets=' + markets : '';
+    htmx.ajax('GET', '/api/markets?crop=' + cropCode + marketsParam, '#market-cards');
+
+    // 更新價差排名表
+    htmx.ajax('GET', '/api/spread?crop=' + cropCode + marketsParam, '#spread-table');
+
+    // 更新趨勢圖
+    if (window.refreshTrendChart) {
+        var params = { crop: cropCode, markets: markets || '{{.BaseMarketCode}}' };
+        if (fromDate && toDate) {
+            params.from = fromDate;
+            params.to = toDate;
+        }
+        window.refreshTrendChart(params);
+    }
+}
+</script>
 {{end}}

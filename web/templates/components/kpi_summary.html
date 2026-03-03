@@ -1,0 +1,64 @@
+{{/*
+  web/templates/components/kpi_summary.html
+  農產品價差雷達系統 — KPI 摘要卡片
+  4 個統計卡片：最高價、最低價、最大價差、市場數量
+  grid-cols-2 lg:grid-cols-4 響應式佈局
+  數字使用 font-data（Fira Code）等寬對齊
+*/}}
+{{define "kpi_summary"}}
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
+    <!-- 最高價 -->
+    <div class="bg-white rounded-xl shadow-sm p-4 card-hover border-l-4 border-emerald-500">
+        <div class="flex items-center gap-2 mb-1">
+            <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+            </svg>
+            <span class="text-xs text-gray-500 font-medium">最高均價</span>
+        </div>
+        <div class="font-data text-2xl font-bold text-gray-900">
+            {{if gt .MaxPrice 0.0}}{{sprintf "%.1f" .MaxPrice}}{{else}}-{{end}}
+        </div>
+        <div class="text-xs text-gray-400">元/公斤</div>
+    </div>
+
+    <!-- 最低價 -->
+    <div class="bg-white rounded-xl shadow-sm p-4 card-hover border-l-4 border-red-500">
+        <div class="flex items-center gap-2 mb-1">
+            <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0v-8m0 8l-8-8-4 4-6-6"/>
+            </svg>
+            <span class="text-xs text-gray-500 font-medium">最低均價</span>
+        </div>
+        <div class="font-data text-2xl font-bold text-gray-900">
+            {{if gt .MinPrice 0.0}}{{sprintf "%.1f" .MinPrice}}{{else}}-{{end}}
+        </div>
+        <div class="text-xs text-gray-400">元/公斤</div>
+    </div>
+
+    <!-- 最大價差 -->
+    <div class="bg-white rounded-xl shadow-sm p-4 card-hover border-l-4 border-cta-500">
+        <div class="flex items-center gap-2 mb-1">
+            <svg class="w-5 h-5 text-cta-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+            </svg>
+            <span class="text-xs text-gray-500 font-medium">最大價差</span>
+        </div>
+        <div class="font-data text-2xl font-bold text-gray-900">
+            {{if gt .MaxSpread 0.0}}{{sprintf "%.1f" .MaxSpread}}{{else}}-{{end}}
+        </div>
+        <div class="text-xs text-gray-400">元/公斤</div>
+    </div>
+
+    <!-- 市場數量 -->
+    <div class="bg-white rounded-xl shadow-sm p-4 card-hover border-l-4 border-brand-500">
+        <div class="flex items-center gap-2 mb-1">
+            <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+            </svg>
+            <span class="text-xs text-gray-500 font-medium">交易市場</span>
+        </div>
+        <div class="font-data text-2xl font-bold text-gray-900">{{.MarketCount}}</div>
+        <div class="text-xs text-gray-400">個市場</div>
+    </div>
+</div>
+{{end}}

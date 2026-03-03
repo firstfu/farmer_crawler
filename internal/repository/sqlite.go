@@ -238,6 +238,35 @@ func (r *SQLiteRepo) GetAllMarkets() ([]struct{ Code int; Name string }, error) 
 	return markets, nil
 }
 
+// GetTrendDataByDateRange 取得指定市場與作物在日期範圍內的趨勢資料
+// fromDate 與 toDate 皆為民國日期格式（例："115.02.01"）
+// 結果按日期升序排列，適合繪製趨勢圖
+func (r *SQLiteRepo) GetTrendDataByDateRange(marketCode int, cropCode, fromDate, toDate string) ([]domain.TrendPoint, error) {
+	query := `
+	SELECT trade_date, avg_price, volume
+	FROM price_records
+	WHERE market_code = ? AND crop_code = ? AND avg_price > 0
+		AND trade_date >= ? AND trade_date <= ?
+	ORDER BY trade_date ASC
+	`
+	rows, err := r.db.Query(query, marketCode, cropCode, fromDate, toDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []domain.TrendPoint
+	for rows.Next() {
+		var p domain.TrendPoint
+		if err := rows.Scan(&p.Date, &p.AvgPrice, &p.Volume); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+
+	return points, nil
+}
+
 // scanRecords 將 sql.Rows 掃描為 PriceRecord 切片
 func scanRecords(rows *sql.Rows) ([]domain.PriceRecord, error) {
 	var records []domain.PriceRecord

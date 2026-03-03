@@ -1,37 +1,69 @@
 {{/*
   web/templates/partials/market_cards.html
-  農產品價差雷達系統 — 市場卡片 HTML 片段
+  農產品價差雷達系統 — 市場卡片 HTML 片段（升級版）
   以卡片形式呈現各市場今日交易行情
-  基準市場以藍色邊框標示，其餘市場以綠色邊框
-  顯示資訊：市場名稱、均價、交易量、價格區間（上價～下價）
+  升級特色：
+    - card-hover 浮起效果 + border-t-4 頂部色帶
+    - 數字使用 font-data（Fira Code）等寬對齊
+    - 價格區間改進度條視覺化
+    - 空狀態加 SVG 圖示
+    - 響應式 grid-cols-1 sm:2 lg:3 xl:4
   可透過 HTMX 局部替換更新
 */}}
 {{define "market_cards"}}
-<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
     {{range .Records}}
-    <div class="bg-white rounded-xl shadow p-4 border-l-4
-        {{if eq .MarketCode $.BaseMarketCode}}border-blue-500{{else}}border-green-500{{end}}">
-        <div class="flex justify-between items-start">
-            <h3 class="font-semibold text-gray-800">{{.MarketName}}</h3>
+    <div class="bg-white rounded-xl shadow-sm card-hover border-t-4 p-5
+        {{if eq .MarketCode $.BaseMarketCode}}border-blue-500{{else}}border-emerald-500{{end}}">
+        <!-- 市場名稱與標籤 -->
+        <div class="flex justify-between items-start mb-3">
+            <h3 class="font-semibold text-gray-800 text-base">{{.MarketName}}</h3>
             {{if eq .MarketCode $.BaseMarketCode}}
-            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">基準</span>
+            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">基準</span>
             {{end}}
         </div>
-        <div class="mt-2">
-            <span class="text-2xl font-bold text-gray-900">{{sprintf "%.1f" .AvgPrice}}</span>
-            <span class="text-sm text-gray-500 ml-1">元/公斤</span>
+
+        <!-- 均價（主要數據） -->
+        <div class="mb-3">
+            <span class="text-3xl font-bold text-gray-900 font-data">{{sprintf "%.1f" .AvgPrice}}</span>
+            <span class="text-sm text-gray-400 ml-1">元/公斤</span>
         </div>
-        <div class="mt-1 text-sm text-gray-500">
-            交易量：{{sprintf "%.0f" .Volume}} 公斤
+
+        <!-- 交易量 -->
+        <div class="text-sm text-gray-500 mb-3 flex items-center gap-1">
+            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+            </svg>
+            <span class="font-data">{{sprintf "%.0f" .Volume}}</span> 公斤
         </div>
-        <div class="mt-1 text-xs text-gray-400">
-            {{sprintf "%.1f" .LowerPrice}} ~ {{sprintf "%.1f" .UpperPrice}}
+
+        <!-- 價格區間進度條 -->
+        <div class="space-y-1">
+            <div class="flex justify-between text-xs text-gray-400 font-data">
+                <span>{{sprintf "%.1f" .LowerPrice}}</span>
+                <span>{{sprintf "%.1f" .UpperPrice}}</span>
+            </div>
+            <div class="price-bar">
+                {{if gt .UpperPrice .LowerPrice}}
+                <div class="price-bar-fill" style="width: {{sprintf "%.0f" (mul (div (subf .AvgPrice .LowerPrice) (subf .UpperPrice .LowerPrice)) 100)}}%"></div>
+                {{else}}
+                <div class="price-bar-fill" style="width: 50%"></div>
+                {{end}}
+            </div>
+            <div class="text-xs text-gray-400 text-center">價格區間</div>
         </div>
     </div>
     {{end}}
+
     {{if not .Records}}
-    <div class="col-span-full text-center text-gray-400 py-8">
-        今日尚無交易資料，請先爬取資料
+    <!-- 空狀態 -->
+    <div class="col-span-full flex flex-col items-center justify-center py-12 text-gray-400">
+        <svg class="w-16 h-16 mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+        </svg>
+        <p class="text-base font-medium">今日尚無交易資料</p>
+        <p class="text-sm mt-1">請先爬取資料或選擇其他日期</p>
     </div>
     {{end}}
 </div>
