@@ -22,7 +22,7 @@ PORT       := 8080
 
 # CGO 環境（SQLite 需要）
 export CGO_ENABLED := 1
-export PATH := C:\msys64\ucrt64\bin;$(PATH)
+export PATH := C:/msys64/ucrt64/bin;$(PATH)
 
 # Go 指令（直接使用 go，需確保 Go 在系統 PATH 中）
 GO := go

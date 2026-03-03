@@ -22,9 +22,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/errgroup"
 
 	"farmer_crawler/internal/config"
 	"farmer_crawler/internal/domain"
@@ -104,11 +106,22 @@ func (h *DashboardHandler) Dashboard(c *gin.Context) {
 	cropCode := c.DefaultQuery("crop", "SQ1")
 	today := service.ToMinguoDate(time.Now())
 
-	spreads, _ := h.analyzer.CalculateSpread(today, cropCode)
-	records, _ := h.repo.GetByDate(today, cropCode)
+	// 並行查詢 5 個獨立資料源（SQLite WAL 模式支援併發讀取）
+	var (
+		spreads      []domain.SpreadResult
+		records      []domain.PriceRecord
+		allMarkets   []struct{ Code int; Name string }
+		health       *domain.CrawlHealth
+		recentStatus []domain.CrawlStatus
+	)
 
-	// 取得所有市場清單
-	allMarkets, _ := h.repo.GetAllMarkets()
+	g, _ := errgroup.WithContext(c.Request.Context())
+	g.Go(func() error { spreads, _ = h.analyzer.CalculateSpread(today, cropCode); return nil })
+	g.Go(func() error { records, _ = h.repo.GetByDate(today, cropCode); return nil })
+	g.Go(func() error { allMarkets, _ = h.repo.GetAllMarkets(); return nil })
+	g.Go(func() error { health, _ = h.repo.GetCrawlHealthSummary(); return nil })
+	g.Go(func() error { recentStatus, _ = h.repo.GetRecentCrawlStatus(5); return nil })
+	g.Wait()
 
 	// 預設選中所有市場
 	selectedMarketsMap := make(map[int]bool)
@@ -156,14 +169,8 @@ func (h *DashboardHandler) Dashboard(c *gin.Context) {
 		"MinPrice":           minPrice,
 		"MaxSpread":          maxSpread,
 		"MarketCount":        len(allMarkets),
-		"CrawlHealth": func() *domain.CrawlHealth {
-			health, _ := h.repo.GetCrawlHealthSummary()
-			return health
-		}(),
-		"RecentCrawlStatus": func() []domain.CrawlStatus {
-			statuses, _ := h.repo.GetRecentCrawlStatus(5)
-			return statuses
-		}(),
+		"CrawlHealth":        health,
+		"RecentCrawlStatus":  recentStatus,
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -245,35 +252,58 @@ func (h *DashboardHandler) TrendData(c *gin.Context) {
 	}
 
 	marketCodes := parseMarketCodes(marketStr)
-	var trends []gin.H
 
-	for _, code := range marketCodes {
-		var points []domain.TrendPoint
-		var err error
+	// 先查一次市場名稱對照表（避免迴圈內重複查詢）
+	markets, _ := h.repo.GetAllMarkets()
+	marketNameMap := make(map[int]string, len(markets))
+	for _, m := range markets {
+		marketNameMap[m.Code] = m.Name
+	}
 
-		if fromDate != "" && toDate != "" {
-			points, err = h.repo.GetTrendDataByDateRange(code, cropCode, fromDate, toDate)
-		} else {
-			points, err = h.repo.GetTrendData(code, cropCode, days)
-		}
+	// 並行查詢所有市場的趨勢資料
+	type trendResult struct {
+		data gin.H
+		ok   bool
+	}
+	results := make([]trendResult, len(marketCodes))
 
-		if err != nil {
-			continue
-		}
+	var wg sync.WaitGroup
+	for i, code := range marketCodes {
+		wg.Add(1)
+		go func(idx int, mktCode int) {
+			defer wg.Done()
 
-		markets, _ := h.repo.GetAllMarkets()
-		name := ""
-		for _, m := range markets {
-			if m.Code == code {
-				name = m.Name
-				break
+			var points []domain.TrendPoint
+			var err error
+
+			if fromDate != "" && toDate != "" {
+				points, err = h.repo.GetTrendDataByDateRange(mktCode, cropCode, fromDate, toDate)
+			} else {
+				points, err = h.repo.GetTrendData(mktCode, cropCode, days)
 			}
+
+			if err != nil {
+				return
+			}
+
+			results[idx] = trendResult{
+				data: gin.H{
+					"market_name": marketNameMap[mktCode],
+					"market_code": mktCode,
+					"points":      points,
+				},
+				ok: true,
+			}
+		}(i, code)
+	}
+	wg.Wait()
+
+	// 按原始順序收集成功的結果
+	var trends []gin.H
+	for _, r := range results {
+		if r.ok {
+			trends = append(trends, r.data)
 		}
-		trends = append(trends, gin.H{
-			"market_name": name,
-			"market_code": code,
-			"points":      points,
-		})
 	}
 
 	c.JSON(http.StatusOK, trends)
