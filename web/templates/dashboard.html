@@ -12,6 +12,11 @@
     <!-- KPI 摘要 -->
     {{template "kpi_summary" .}}
 
+    <!-- 爬蟲健康度 -->
+    <section class="animate-fade-in">
+        {{template "crawl_health" .}}
+    </section>
+
     <!-- 篩選工具列 -->
     {{template "filter_bar" .}}
 

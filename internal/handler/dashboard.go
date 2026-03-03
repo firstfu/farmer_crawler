@@ -15,6 +15,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -61,6 +62,14 @@ func NewDashboardHandler(repo *repository.SQLiteRepo, analyzer *service.Analyzer
 		"index_map": func(m map[int]bool, key int) bool {
 			return m[key]
 		},
+		"dict": func(values ...interface{}) map[string]interface{} {
+			dict := make(map[string]interface{})
+			for i := 0; i < len(values)-1; i += 2 {
+				key, _ := values[i].(string)
+				dict[key] = values[i+1]
+			}
+			return dict
+		},
 	}
 
 	tmpl := template.Must(template.New("").Funcs(funcMap).ParseGlob("web/templates/*.html"))
@@ -77,13 +86,15 @@ func NewDashboardHandler(repo *repository.SQLiteRepo, analyzer *service.Analyzer
 }
 
 // RegisterRoutes 註冊所有路由到 Gin 引擎
-// 包含主頁面、HTMX 端點與手動爬取端點
+// 包含主頁面、HTMX 端點、手動爬取端點與 SSE 日期範圍爬取端點
 func (h *DashboardHandler) RegisterRoutes(r *gin.Engine) {
 	r.GET("/", h.Dashboard)
 	r.GET("/api/markets", h.MarketCards)
 	r.GET("/api/spread", h.SpreadTable)
 	r.GET("/api/trend", h.TrendData)
 	r.POST("/api/crawl", h.TriggerCrawl)
+	r.GET("/api/crawl/range", h.TriggerCrawlRange)
+	r.GET("/api/crawl-status", h.CrawlStatus)
 }
 
 // Dashboard 主儀表板頁面
@@ -145,6 +156,14 @@ func (h *DashboardHandler) Dashboard(c *gin.Context) {
 		"MinPrice":           minPrice,
 		"MaxSpread":          maxSpread,
 		"MarketCount":        len(allMarkets),
+		"CrawlHealth": func() *domain.CrawlHealth {
+			health, _ := h.repo.GetCrawlHealthSummary()
+			return health
+		}(),
+		"RecentCrawlStatus": func() []domain.CrawlStatus {
+			statuses, _ := h.repo.GetRecentCrawlStatus(5)
+			return statuses
+		}(),
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -272,6 +291,77 @@ func (h *DashboardHandler) TriggerCrawl(c *gin.Context) {
 	}
 	c.String(http.StatusOK,
 		`<div class="text-emerald-600 p-2 text-sm font-medium">爬取成功！共 %d 筆記錄</div>`, count)
+}
+
+// TriggerCrawlRange 日期範圍爬取 SSE 端點
+// 查詢參數：from（起始民國日期）、to（結束民國日期）
+// 透過 Server-Sent Events 即時推送每批次進度
+func (h *DashboardHandler) TriggerCrawlRange(c *gin.Context) {
+	from := c.Query("from")
+	to := c.Query("to")
+
+	if from == "" || to == "" {
+		c.String(http.StatusBadRequest, "缺少 from 或 to 參數")
+		return
+	}
+
+	// 設定 SSE 標頭
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.String(http.StatusInternalServerError, "不支援 streaming")
+		return
+	}
+
+	batchDays := h.cfg.Crawler.BatchDays
+	batchDelay := h.cfg.Crawler.BatchDelay
+
+	progressFn := func(p domain.CrawlBatchProgress) {
+		data, _ := json.Marshal(p)
+		fmt.Fprintf(c.Writer, "event: progress\ndata: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	totalRecords, failedBatches, err := h.crawler.CrawlRangeWithProgress(from, to, batchDays, batchDelay, progressFn)
+
+	// 推送完成事件
+	result := domain.CrawlBatchResult{
+		TotalRecords:  totalRecords,
+		FailedBatches: failedBatches,
+	}
+	if err != nil {
+		result.Status = "failed"
+	} else if failedBatches > 0 {
+		result.Status = "partial"
+	} else {
+		result.Status = "completed"
+	}
+	// 計算總批次數
+	batches, _ := service.SplitDateRange(from, to, batchDays)
+	result.TotalBatches = len(batches)
+
+	doneData, _ := json.Marshal(result)
+	fmt.Fprintf(c.Writer, "event: done\ndata: %s\n\n", doneData)
+	flusher.Flush()
+}
+
+// CrawlStatus 爬蟲健康度 HTMX 端點
+// 回傳最近爬取狀態與健康度摘要 HTML 片段
+func (h *DashboardHandler) CrawlStatus(c *gin.Context) {
+	health, _ := h.repo.GetCrawlHealthSummary()
+	recentStatus, _ := h.repo.GetRecentCrawlStatus(5)
+
+	data := gin.H{
+		"CrawlHealth":       health,
+		"RecentCrawlStatus": recentStatus,
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	h.tmpl.ExecuteTemplate(c.Writer, "crawl_health", data)
 }
 
 // parseMarketCodes 解析逗號分隔的市場代碼字串

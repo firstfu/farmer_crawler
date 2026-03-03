@@ -1,0 +1,66 @@
+{{/*
+  web/templates/components/crawl_health.html
+  農產品價差雷達系統 — 爬蟲健康度組件
+  顯示：最近爬取狀態、24h 成功率、最近 5 次爬取記錄
+  支援 HTMX 局部更新（hx-get="/api/crawl-status"）
+*/}}
+{{define "crawl_health"}}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+    <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-600 flex items-center gap-2">
+            <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            爬蟲健康度
+        </h3>
+        <button hx-get="/api/crawl-status" hx-target="#crawl-health-content" hx-swap="innerHTML"
+                class="text-xs text-brand-600 hover:text-brand-700 font-medium">
+            重新整理
+        </button>
+    </div>
+    <div id="crawl-health-content">
+        {{if .CrawlHealth}}
+        <div class="grid grid-cols-3 gap-3 mb-3">
+            <div class="text-center">
+                <div class="text-lg font-bold {{if eq .CrawlHealth.LastStatus "success"}}text-emerald-600{{else if eq .CrawlHealth.LastStatus "unknown"}}text-gray-400{{else}}text-red-600{{end}}">
+                    {{if eq .CrawlHealth.LastStatus "success"}}正常{{else if eq .CrawlHealth.LastStatus "unknown"}}無資料{{else}}異常{{end}}
+                </div>
+                <div class="text-xs text-gray-500">最近狀態</div>
+            </div>
+            <div class="text-center">
+                <div class="text-lg font-bold {{if ge .CrawlHealth.SuccessRate24h 90.0}}text-emerald-600{{else if ge .CrawlHealth.SuccessRate24h 50.0}}text-yellow-600{{else}}text-red-600{{end}}">
+                    {{sprintf "%.0f%%" .CrawlHealth.SuccessRate24h}}
+                </div>
+                <div class="text-xs text-gray-500">24h 成功率</div>
+            </div>
+            <div class="text-center">
+                <div class="text-lg font-bold text-gray-700">{{.CrawlHealth.TotalCrawls24h}}</div>
+                <div class="text-xs text-gray-500">24h 爬取次數</div>
+            </div>
+        </div>
+        {{end}}
+
+        {{if .RecentCrawlStatus}}
+        <div class="border-t border-gray-100 pt-2">
+            <div class="text-xs text-gray-500 mb-1">最近爬取記錄</div>
+            <div class="space-y-1">
+                {{range .RecentCrawlStatus}}
+                <div class="flex items-center justify-between text-xs">
+                    <span class="text-gray-600">{{.DateFrom}} ~ {{.DateTo}}</span>
+                    <span class="flex items-center gap-1">
+                        {{if eq .Status "success"}}
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        <span class="text-emerald-600">{{.RecordCount}} 筆</span>
+                        {{else}}
+                        <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                        <span class="text-red-600">{{.Status}}</span>
+                        {{end}}
+                    </span>
+                </div>
+                {{end}}
+            </div>
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}
