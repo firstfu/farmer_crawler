@@ -69,6 +69,18 @@ func (r *SQLiteRepo) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_trade_date ON price_records(trade_date);
 	CREATE INDEX IF NOT EXISTS idx_market_code ON price_records(market_code);
+
+	CREATE TABLE IF NOT EXISTS crawl_status (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		crawl_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		date_from TEXT NOT NULL,
+		date_to TEXT NOT NULL,
+		record_count INTEGER DEFAULT 0,
+		status TEXT NOT NULL,
+		error_msg TEXT DEFAULT '',
+		duration_ms INTEGER DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_crawl_status_time ON crawl_status(crawl_time);
 	`
 	_, err := r.db.Exec(schema)
 	return err
@@ -219,7 +231,10 @@ func (r *SQLiteRepo) GetTrendData(marketCode int, cropCode string, days int) ([]
 }
 
 // GetAllMarkets 取得所有不重複的市場代碼與名稱
-func (r *SQLiteRepo) GetAllMarkets() ([]struct{ Code int; Name string }, error) {
+func (r *SQLiteRepo) GetAllMarkets() ([]struct {
+	Code int
+	Name string
+}, error) {
 	query := `SELECT DISTINCT market_code, market_name FROM price_records ORDER BY market_code`
 	rows, err := r.db.Query(query)
 	if err != nil {
@@ -227,9 +242,15 @@ func (r *SQLiteRepo) GetAllMarkets() ([]struct{ Code int; Name string }, error) 
 	}
 	defer rows.Close()
 
-	var markets []struct{ Code int; Name string }
+	var markets []struct {
+		Code int
+		Name string
+	}
 	for rows.Next() {
-		var m struct{ Code int; Name string }
+		var m struct {
+			Code int
+			Name string
+		}
 		if err := rows.Scan(&m.Code, &m.Name); err != nil {
 			return nil, err
 		}
@@ -267,6 +288,28 @@ func (r *SQLiteRepo) GetTrendDataByDateRange(marketCode int, cropCode, fromDate,
 	return points, nil
 }
 
+// GetExistingTradeDates 查詢指定日期範圍內已有資料的交易日期集合
+// fromDate 與 toDate 皆為民國日期格式（例："115.02.01"）
+// 回傳 map[string]bool，key 為已存在的交易日期
+func (r *SQLiteRepo) GetExistingTradeDates(fromDate, toDate string) (map[string]bool, error) {
+	query := `SELECT DISTINCT trade_date FROM price_records WHERE trade_date >= ? AND trade_date <= ?`
+	rows, err := r.db.Query(query, fromDate, toDate)
+	if err != nil {
+		return nil, fmt.Errorf("查詢已有交易日期失敗: %w", err)
+	}
+	defer rows.Close()
+
+	dates := make(map[string]bool)
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		dates[d] = true
+	}
+	return dates, nil
+}
+
 // scanRecords 將 sql.Rows 掃描為 PriceRecord 切片
 func scanRecords(rows *sql.Rows) ([]domain.PriceRecord, error) {
 	var records []domain.PriceRecord
@@ -284,4 +327,85 @@ func scanRecords(rows *sql.Rows) ([]domain.PriceRecord, error) {
 		records = append(records, r)
 	}
 	return records, nil
+}
+
+// SaveCrawlStatus 儲存一筆爬取狀態記錄
+func (r *SQLiteRepo) SaveCrawlStatus(status *domain.CrawlStatus) error {
+	query := `
+	INSERT INTO crawl_status (date_from, date_to, record_count, status, error_msg, duration_ms)
+	VALUES (?, ?, ?, ?, ?, ?)
+	`
+	result, err := r.db.Exec(query,
+		status.DateFrom, status.DateTo, status.RecordCount,
+		status.Status, status.ErrorMsg, status.DurationMs,
+	)
+	if err != nil {
+		return fmt.Errorf("儲存爬取狀態失敗: %w", err)
+	}
+	id, _ := result.LastInsertId()
+	status.ID = id
+	return nil
+}
+
+// GetRecentCrawlStatus 取得最近 N 筆爬取狀態（依時間降序）
+func (r *SQLiteRepo) GetRecentCrawlStatus(limit int) ([]domain.CrawlStatus, error) {
+	query := `
+	SELECT id, crawl_time, date_from, date_to, record_count, status, error_msg, duration_ms
+	FROM crawl_status
+	ORDER BY crawl_time DESC
+	LIMIT ?
+	`
+	rows, err := r.db.Query(query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("查詢爬取狀態失敗: %w", err)
+	}
+	defer rows.Close()
+
+	var statuses []domain.CrawlStatus
+	for rows.Next() {
+		var s domain.CrawlStatus
+		if err := rows.Scan(&s.ID, &s.CrawlTime, &s.DateFrom, &s.DateTo,
+			&s.RecordCount, &s.Status, &s.ErrorMsg, &s.DurationMs); err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, s)
+	}
+	return statuses, nil
+}
+
+// GetCrawlHealthSummary 取得最近 24 小時的爬蟲健康度摘要
+func (r *SQLiteRepo) GetCrawlHealthSummary() (*domain.CrawlHealth, error) {
+	health := &domain.CrawlHealth{}
+
+	// 最近 24 小時的統計
+	query := `
+	SELECT
+		COUNT(*) as total,
+		SUM(CASE WHEN status != 'success' THEN 1 ELSE 0 END) as failed
+	FROM crawl_status
+	WHERE crawl_time >= datetime('now', '-24 hours')
+	`
+	err := r.db.QueryRow(query).Scan(&health.TotalCrawls24h, &health.FailedCrawls24h)
+	if err != nil {
+		return nil, fmt.Errorf("查詢健康度統計失敗: %w", err)
+	}
+
+	if health.TotalCrawls24h > 0 {
+		health.SuccessRate24h = float64(health.TotalCrawls24h-health.FailedCrawls24h) / float64(health.TotalCrawls24h) * 100
+	}
+
+	// 最近一次爬取
+	lastQuery := `
+	SELECT crawl_time, status
+	FROM crawl_status
+	ORDER BY crawl_time DESC
+	LIMIT 1
+	`
+	err = r.db.QueryRow(lastQuery).Scan(&health.LastCrawlTime, &health.LastStatus)
+	if err != nil {
+		// 無記錄時不回報錯誤
+		health.LastStatus = "unknown"
+	}
+
+	return health, nil
 }

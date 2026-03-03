@@ -165,3 +165,67 @@ func TestGetTrendData(t *testing.T) {
 		t.Errorf("預期 3 筆趨勢資料，得到 %d 筆", len(points))
 	}
 }
+
+func TestSaveCrawlStatus(t *testing.T) {
+	repo := setupTestDB(t)
+
+	status := domain.CrawlStatus{
+		DateFrom:    "115.03.01",
+		DateTo:      "115.03.03",
+		RecordCount: 42,
+		Status:      "success",
+		ErrorMsg:    "",
+		DurationMs:  1500,
+	}
+
+	err := repo.SaveCrawlStatus(&status)
+	if err != nil {
+		t.Fatalf("SaveCrawlStatus 失敗: %v", err)
+	}
+
+	results, err := repo.GetRecentCrawlStatus(5)
+	if err != nil {
+		t.Fatalf("GetRecentCrawlStatus 失敗: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("預期 1 筆狀態記錄，得到 %d 筆", len(results))
+	}
+	if results[0].Status != "success" {
+		t.Errorf("預期狀態 success，得到 %s", results[0].Status)
+	}
+	if results[0].RecordCount != 42 {
+		t.Errorf("預期 42 筆記錄，得到 %d", results[0].RecordCount)
+	}
+}
+
+func TestGetCrawlHealthSummary(t *testing.T) {
+	repo := setupTestDB(t)
+
+	// 插入 3 筆狀態：2 成功 1 失敗
+	statuses := []domain.CrawlStatus{
+		{DateFrom: "115.03.01", DateTo: "115.03.01", RecordCount: 10, Status: "success", DurationMs: 500},
+		{DateFrom: "115.03.02", DateTo: "115.03.02", RecordCount: 0, Status: "failed", ErrorMsg: "timeout", DurationMs: 30000},
+		{DateFrom: "115.03.03", DateTo: "115.03.03", RecordCount: 15, Status: "success", DurationMs: 800},
+	}
+	for i := range statuses {
+		if err := repo.SaveCrawlStatus(&statuses[i]); err != nil {
+			t.Fatalf("SaveCrawlStatus 失敗: %v", err)
+		}
+	}
+
+	health, err := repo.GetCrawlHealthSummary()
+	if err != nil {
+		t.Fatalf("GetCrawlHealthSummary 失敗: %v", err)
+	}
+	if health.TotalCrawls24h != 3 {
+		t.Errorf("預期 3 次爬取，得到 %d", health.TotalCrawls24h)
+	}
+	if health.FailedCrawls24h != 1 {
+		t.Errorf("預期 1 次失敗，得到 %d", health.FailedCrawls24h)
+	}
+	// 成功率 = 2/3 ≈ 66.67
+	expectedRate := 66.67
+	if health.SuccessRate24h < expectedRate-1 || health.SuccessRate24h > expectedRate+1 {
+		t.Errorf("預期成功率約 %.2f%%，得到 %.2f%%", expectedRate, health.SuccessRate24h)
+	}
+}
