@@ -27,7 +27,7 @@
             {{end}}
         </div>
 
-        <!-- 爬取按鈕 -->
+        <!-- 爬取按鈕群組 -->
         <div class="flex items-center gap-3">
             <div id="crawl-status" class="text-sm"></div>
             <button id="crawl-btn"
@@ -36,7 +36,6 @@
                     hx-swap="innerHTML"
                     hx-indicator="#crawl-spinner"
                     class="bg-cta-500 hover:bg-cta-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow flex items-center gap-2">
-                <!-- Spinner（預設隱藏） -->
                 <svg id="crawl-spinner" class="htmx-indicator animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -45,6 +44,13 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                 </svg>
                 爬取今日資料
+            </button>
+            <button id="range-crawl-btn" type="button" onclick="startRangeCrawl()"
+                    class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm hover:shadow flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                爬取日期範圍
             </button>
         </div>
     </div>
@@ -107,6 +113,22 @@
             </svg>
             套用篩選
         </button>
+    </div>
+
+    <!-- 爬取進度面板（預設隱藏） -->
+    <div id="crawl-progress-panel" class="hidden bg-slate-50 rounded-lg p-4 border border-slate-200">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium text-gray-700">爬取進度</span>
+            <button type="button" onclick="cancelCrawl()" id="cancel-crawl-btn"
+                    class="text-xs text-red-500 hover:text-red-700 font-medium">取消</button>
+        </div>
+        <!-- 進度條 -->
+        <div class="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+            <div id="crawl-progress-bar" class="bg-amber-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+        <div id="crawl-progress-text" class="text-xs text-gray-500 mb-2">準備中...</div>
+        <!-- 批次日誌 -->
+        <div id="crawl-log" class="max-h-32 overflow-y-auto text-xs font-data space-y-0.5"></div>
     </div>
 </div>
 
@@ -172,6 +194,97 @@ function getSelectedMarkets() {
     var codes = [];
     checked.forEach(function(cb) { codes.push(cb.value); });
     return codes.join(',');
+}
+
+// === SSE 日期範圍爬取 ===
+var rangeCrawlSource = null;
+
+// 啟動日期範圍爬取
+function startRangeCrawl() {
+    var fromVal = document.getElementById('date-from').value;
+    var toVal = document.getElementById('date-to').value;
+
+    if (!fromVal || !toVal) {
+        alert('請先選擇起始和結束日期');
+        return;
+    }
+
+    var fromDate = toMinguoDate(fromVal);
+    var toDate = toMinguoDate(toVal);
+
+    // 顯示進度面板
+    var panel = document.getElementById('crawl-progress-panel');
+    panel.classList.remove('hidden');
+    document.getElementById('crawl-progress-bar').style.width = '0%';
+    document.getElementById('crawl-progress-text').textContent = '連線中...';
+    document.getElementById('crawl-log').innerHTML = '';
+    document.getElementById('range-crawl-btn').disabled = true;
+    document.getElementById('range-crawl-btn').classList.add('opacity-50');
+
+    // 開啟 SSE 連線
+    var url = '/api/crawl/range?from=' + encodeURIComponent(fromDate) + '&to=' + encodeURIComponent(toDate);
+    rangeCrawlSource = new EventSource(url);
+
+    rangeCrawlSource.addEventListener('progress', function(e) {
+        var data = JSON.parse(e.data);
+        var pct = Math.round((data.batch_index / data.total_batch) * 100);
+        document.getElementById('crawl-progress-bar').style.width = pct + '%';
+        document.getElementById('crawl-progress-text').textContent =
+            '批次 ' + data.batch_index + '/' + data.total_batch + ' (' + data.from_date + ' ~ ' + data.to_date + ')';
+
+        var logDiv = document.getElementById('crawl-log');
+        var statusClass = data.status === 'success' ? 'text-emerald-600' : 'text-red-500';
+        var statusText = data.status === 'success'
+            ? data.record_count + ' 筆'
+            : '失敗: ' + (data.error || '未知錯誤');
+        logDiv.innerHTML += '<div class="' + statusClass + '">[' + data.batch_index + '/' + data.total_batch + '] '
+            + data.from_date + '~' + data.to_date + ' → ' + statusText + '</div>';
+        logDiv.scrollTop = logDiv.scrollHeight;
+    });
+
+    rangeCrawlSource.addEventListener('done', function(e) {
+        var data = JSON.parse(e.data);
+        rangeCrawlSource.close();
+        rangeCrawlSource = null;
+
+        document.getElementById('crawl-progress-bar').style.width = '100%';
+        var statusMsg = data.status === 'completed'
+            ? '完成！共 ' + data.total_records + ' 筆記錄'
+            : data.status === 'partial'
+            ? '部分完成：' + data.total_records + ' 筆，' + data.failed_batches + ' 批失敗'
+            : '爬取失敗';
+        var barColor = data.status === 'completed' ? 'bg-emerald-500' : data.status === 'partial' ? 'bg-amber-500' : 'bg-red-500';
+        document.getElementById('crawl-progress-bar').className = barColor + ' h-2.5 rounded-full transition-all duration-300';
+        document.getElementById('crawl-progress-text').textContent = statusMsg;
+        document.getElementById('range-crawl-btn').disabled = false;
+        document.getElementById('range-crawl-btn').classList.remove('opacity-50');
+
+        // 完成後刷新資料面板
+        applyFilters();
+    });
+
+    rangeCrawlSource.onerror = function() {
+        if (rangeCrawlSource) {
+            rangeCrawlSource.close();
+            rangeCrawlSource = null;
+        }
+        document.getElementById('crawl-progress-text').textContent = '連線中斷';
+        document.getElementById('crawl-progress-bar').className = 'bg-red-500 h-2.5 rounded-full transition-all duration-300';
+        document.getElementById('range-crawl-btn').disabled = false;
+        document.getElementById('range-crawl-btn').classList.remove('opacity-50');
+    };
+}
+
+// 取消爬取
+function cancelCrawl() {
+    if (rangeCrawlSource) {
+        rangeCrawlSource.close();
+        rangeCrawlSource = null;
+    }
+    document.getElementById('crawl-progress-text').textContent = '已取消';
+    document.getElementById('crawl-progress-bar').className = 'bg-gray-400 h-2.5 rounded-full transition-all duration-300';
+    document.getElementById('range-crawl-btn').disabled = false;
+    document.getElementById('range-crawl-btn').classList.remove('opacity-50');
 }
 
 // 套用篩選
