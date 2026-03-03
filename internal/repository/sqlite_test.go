@@ -27,13 +27,18 @@ func setupTestDB(t *testing.T) *SQLiteRepo {
 func TestNewSQLiteRepo_CreatesTable(t *testing.T) {
 	repo := setupTestDB(t)
 
-	var count int
-	err := repo.db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='price_records'").Scan(&count)
-	if err != nil {
-		t.Fatalf("查詢失敗: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("預期 price_records 表存在，但 count=%d", count)
+	tables := []string{"price_records", "crawl_status", "schema_migrations"}
+	for _, table := range tables {
+		var count int
+		err := repo.db.QueryRow(
+			"SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", table,
+		).Scan(&count)
+		if err != nil {
+			t.Fatalf("查詢 %s 失敗: %v", table, err)
+		}
+		if count != 1 {
+			t.Errorf("預期 %s 表存在，但 count=%d", table, count)
+		}
 	}
 }
 
@@ -227,5 +232,71 @@ func TestGetCrawlHealthSummary(t *testing.T) {
 	expectedRate := 66.67
 	if health.SuccessRate24h < expectedRate-1 || health.SuccessRate24h > expectedRate+1 {
 		t.Errorf("預期成功率約 %.2f%%，得到 %.2f%%", expectedRate, health.SuccessRate24h)
+	}
+}
+
+func TestMigration_CreatesSchemaTable(t *testing.T) {
+	repo := setupTestDB(t)
+
+	var count int
+	err := repo.db.QueryRow(
+		"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("查詢失敗: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("預期 schema_migrations 表存在，但 count=%d", count)
+	}
+}
+
+func TestMigration_RecordsVersion(t *testing.T) {
+	repo := setupTestDB(t)
+
+	var maxVersion int
+	err := repo.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&maxVersion)
+	if err != nil {
+		t.Fatalf("查詢版本失敗: %v", err)
+	}
+	if maxVersion < 2 {
+		t.Errorf("預期至少 2 個 migration 版本，得到 %d", maxVersion)
+	}
+}
+
+func TestMigration_Idempotent(t *testing.T) {
+	dbPath := "test_idempotent.db"
+	t.Cleanup(func() { os.Remove(dbPath) })
+
+	repo1, err := NewSQLiteRepo(dbPath)
+	if err != nil {
+		t.Fatalf("第一次建立失敗: %v", err)
+	}
+	repo1.Close()
+
+	repo2, err := NewSQLiteRepo(dbPath)
+	if err != nil {
+		t.Fatalf("第二次開啟失敗: %v", err)
+	}
+	defer repo2.Close()
+
+	var count int
+	err = repo2.db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count)
+	if err != nil {
+		t.Fatalf("查詢失敗: %v", err)
+	}
+	if count != len(migrations) {
+		t.Errorf("預期 %d 筆 migration 紀錄，得到 %d（有重複執行）", len(migrations), count)
+	}
+}
+
+func TestGetCurrentVersion(t *testing.T) {
+	repo := setupTestDB(t)
+
+	version, err := repo.GetCurrentVersion()
+	if err != nil {
+		t.Fatalf("GetCurrentVersion 失敗: %v", err)
+	}
+	if version != len(migrations) {
+		t.Errorf("預期版本 %d，得到 %d", len(migrations), version)
 	}
 }

@@ -1,6 +1,7 @@
 // internal/repository/sqlite.go
 // 農產品價差雷達系統 — Repository 層
-// 負責 SQLite 資料庫初始化、price_records 表的 CRUD 與 Upsert 操作
+// 負責 SQLite 資料庫初始化、版本化 migration、price_records 表的 CRUD 與 Upsert 操作
+// 使用 schema_migrations 表追蹤版本，支援增量 schema 變更
 // Upsert 基於 (trade_date, market_code, crop_code) 唯一約束
 // 使用 WAL 模式提升並發讀寫效能
 
@@ -9,6 +10,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -20,6 +22,58 @@ import (
 // SQLiteRepo 封裝 SQLite 資料庫連線與操作方法
 type SQLiteRepo struct {
 	db *sql.DB
+}
+
+// migration 定義一個資料庫結構變更
+type migration struct {
+	Version     int
+	Description string
+	Up          string
+}
+
+// migrations 所有的資料庫結構變更，按版本號遞增排列
+// 新增 migration 時，在此 slice 末尾追加即可
+var migrations = []migration{
+	{
+		Version:     1,
+		Description: "建立 price_records 表與索引",
+		Up: `
+		CREATE TABLE IF NOT EXISTS price_records (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			trade_date    TEXT NOT NULL,
+			crop_code     TEXT NOT NULL,
+			crop_name     TEXT NOT NULL,
+			market_code   INTEGER NOT NULL,
+			market_name   TEXT NOT NULL,
+			upper_price   REAL,
+			middle_price  REAL,
+			lower_price   REAL,
+			avg_price     REAL,
+			volume        REAL,
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(trade_date, market_code, crop_code)
+		);
+		CREATE INDEX IF NOT EXISTS idx_trade_date ON price_records(trade_date);
+		CREATE INDEX IF NOT EXISTS idx_market_code ON price_records(market_code);
+		`,
+	},
+	{
+		Version:     2,
+		Description: "建立 crawl_status 表與索引",
+		Up: `
+		CREATE TABLE IF NOT EXISTS crawl_status (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			crawl_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			date_from TEXT NOT NULL,
+			date_to TEXT NOT NULL,
+			record_count INTEGER DEFAULT 0,
+			status TEXT NOT NULL,
+			error_msg TEXT DEFAULT '',
+			duration_ms INTEGER DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS idx_crawl_status_time ON crawl_status(crawl_time);
+		`,
+	},
 }
 
 // NewSQLiteRepo 建立新的 SQLite Repository 實例
@@ -49,46 +103,77 @@ func NewSQLiteRepo(dbPath string) (*SQLiteRepo, error) {
 	return repo, nil
 }
 
-// migrate 執行資料表建立與索引建立
+// migrate 執行版本化資料庫遷移
+// 1. 建立 schema_migrations 表（如不存在）
+// 2. 查詢目前已套用的最大版本號
+// 3. 依序執行尚未套用的 migration（每個在 transaction 中執行）
 func (r *SQLiteRepo) migrate() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS price_records (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		trade_date    TEXT NOT NULL,
-		crop_code     TEXT NOT NULL,
-		crop_name     TEXT NOT NULL,
-		market_code   INTEGER NOT NULL,
-		market_name   TEXT NOT NULL,
-		upper_price   REAL,
-		middle_price  REAL,
-		lower_price   REAL,
-		avg_price     REAL,
-		volume        REAL,
-		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(trade_date, market_code, crop_code)
-	);
-	CREATE INDEX IF NOT EXISTS idx_trade_date ON price_records(trade_date);
-	CREATE INDEX IF NOT EXISTS idx_market_code ON price_records(market_code);
+	// 建立 migration 追蹤表
+	_, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version     INTEGER PRIMARY KEY,
+			description TEXT NOT NULL,
+			applied_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("建立 schema_migrations 表失敗: %w", err)
+	}
 
-	CREATE TABLE IF NOT EXISTS crawl_status (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		crawl_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		date_from TEXT NOT NULL,
-		date_to TEXT NOT NULL,
-		record_count INTEGER DEFAULT 0,
-		status TEXT NOT NULL,
-		error_msg TEXT DEFAULT '',
-		duration_ms INTEGER DEFAULT 0
-	);
-	CREATE INDEX IF NOT EXISTS idx_crawl_status_time ON crawl_status(crawl_time);
-	`
-	_, err := r.db.Exec(schema)
-	return err
+	// 查詢目前版本
+	var currentVersion int
+	err = r.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&currentVersion)
+	if err != nil {
+		return fmt.Errorf("查詢目前版本失敗: %w", err)
+	}
+
+	// 執行尚未套用的 migration
+	for _, m := range migrations {
+		if m.Version <= currentVersion {
+			continue
+		}
+
+		tx, err := r.db.Begin()
+		if err != nil {
+			return fmt.Errorf("開始 migration v%d 交易失敗: %w", m.Version, err)
+		}
+
+		if _, err := tx.Exec(m.Up); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("執行 migration v%d (%s) 失敗: %w", m.Version, m.Description, err)
+		}
+
+		if _, err := tx.Exec(
+			"INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
+			m.Version, m.Description,
+		); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("記錄 migration v%d 版本失敗: %w", m.Version, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("提交 migration v%d 失敗: %w", m.Version, err)
+		}
+
+		log.Printf("[Migration] v%d: %s", m.Version, m.Description)
+	}
+
+	return nil
 }
 
 // Close 關閉資料庫連線
 func (r *SQLiteRepo) Close() error {
 	return r.db.Close()
+}
+
+// GetCurrentVersion 取得目前資料庫的 schema 版本號
+func (r *SQLiteRepo) GetCurrentVersion() (int, error) {
+	var version int
+	err := r.db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version)
+	if err != nil {
+		return 0, fmt.Errorf("查詢 schema 版本失敗: %w", err)
+	}
+	return version, nil
 }
 
 // Upsert 插入或更新一筆交易記錄
