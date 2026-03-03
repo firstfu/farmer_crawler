@@ -1,0 +1,17 @@
+app:
+  port: 8080
+  db_path: "./data/market.db"
+
+crawler:
+  api_url: "https://data.moa.gov.tw/Service/OpenData/FromM/FarmTransData.aspx"
+  crop_name: "茭白筍"
+  schedule: "0 10 * * *"
+  retry_count: 3
+  retry_interval: 30s
+
+analyzer:
+  base_market_code: 400
+  base_market_name: "台中市"
+  crop_codes:
+    - "SQ1"
+    - "SQ3"
