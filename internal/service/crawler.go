@@ -18,6 +18,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"farmer_crawler/internal/domain"
@@ -27,17 +28,17 @@ import (
 // apiRecordJSON 對應農糧署 API 回傳的中文鍵名 JSON 結構
 // 每個欄位的 json tag 使用中文名稱以符合 API 回傳格式
 type apiRecordJSON struct {
-	TradeDate   string  `json:"交易日期"`
-	TypeCode    string  `json:"種類代碼"`
-	CropCode    string  `json:"作物代號"`
-	CropName    string  `json:"作物名稱"`
-	MarketCode  int     `json:"市場代號"`
-	MarketName  string  `json:"市場名稱"`
-	UpperPrice  float64 `json:"上價"`
-	MiddlePrice float64 `json:"中價"`
-	LowerPrice  float64 `json:"下價"`
-	AvgPrice    float64 `json:"平均價"`
-	Volume      float64 `json:"交易量"`
+	TradeDate   string      `json:"交易日期"`
+	TypeCode    string      `json:"種類代碼"`
+	CropCode    string      `json:"作物代號"`
+	CropName    string      `json:"作物名稱"`
+	MarketCode  json.Number `json:"市場代號"` // API 可能回傳 int 或 string
+	MarketName  string      `json:"市場名稱"`
+	UpperPrice  float64     `json:"上價"`
+	MiddlePrice float64     `json:"中價"`
+	LowerPrice  float64     `json:"下價"`
+	AvgPrice    float64     `json:"平均價"`
+	Volume      float64     `json:"交易量"`
 }
 
 // CrawlerService 爬蟲服務主結構
@@ -111,11 +112,17 @@ func (s *CrawlerService) ParseAPIResponse(data []byte) ([]domain.PriceRecord, er
 			continue
 		}
 
+		marketCode, err := parseMarketCode(raw.MarketCode)
+		if err != nil {
+			log.Printf("[爬蟲] 跳過無效市場代號: %v", raw.MarketCode)
+			continue
+		}
+
 		records = append(records, domain.PriceRecord{
 			TradeDate:   raw.TradeDate,
 			CropCode:    raw.CropCode,
 			CropName:    raw.CropName,
-			MarketCode:  raw.MarketCode,
+			MarketCode:  marketCode,
 			MarketName:  raw.MarketName,
 			UpperPrice:  raw.UpperPrice,
 			MiddlePrice: raw.MiddlePrice,
@@ -204,4 +211,14 @@ func (s *CrawlerService) CrawlToday() (int, error) {
 // 參數 from、to 皆為民國日期格式（例如 "114.03.01"）
 func (s *CrawlerService) CrawlRange(from, to string) (int, error) {
 	return s.FetchAndStore(from, to)
+}
+
+// parseMarketCode 將 json.Number 轉為 int，處理 API 回傳 string 或 int 的情況
+func parseMarketCode(n json.Number) (int, error) {
+	// 先嘗試直接轉 int64
+	if v, err := n.Int64(); err == nil {
+		return int(v), nil
+	}
+	// 若為 string 格式則用 strconv
+	return strconv.Atoi(n.String())
 }

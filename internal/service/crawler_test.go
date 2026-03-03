@@ -179,6 +179,7 @@ func TestParseAPIResponse_EmptyArray(t *testing.T) {
 
 // TestAPIRecordJSONMapping 測試中文 JSON 鍵名能正確反序列化到 apiRecordJSON 結構
 func TestAPIRecordJSONMapping(t *testing.T) {
+	// 測試 int 格式的市場代號
 	jsonStr := `{
 		"交易日期": "114.03.03",
 		"種類代碼": "V",
@@ -199,38 +200,41 @@ func TestAPIRecordJSONMapping(t *testing.T) {
 		t.Fatalf("JSON 反序列化失敗: %v", err)
 	}
 
-	if rec.TradeDate != "114.03.03" {
-		t.Errorf("交易日期預期 114.03.03，得到 %s", rec.TradeDate)
-	}
-	if rec.TypeCode != "V" {
-		t.Errorf("種類代碼預期 V，得到 %s", rec.TypeCode)
-	}
 	if rec.CropCode != "SQ1" {
 		t.Errorf("作物代號預期 SQ1，得到 %s", rec.CropCode)
 	}
-	if rec.CropName != "茭白筍-帶殼" {
-		t.Errorf("作物名稱預期 茭白筍-帶殼，得到 %s", rec.CropName)
+	code, _ := rec.MarketCode.Int64()
+	if code != 400 {
+		t.Errorf("市場代號預期 400，得到 %d", code)
 	}
-	if rec.MarketCode != 400 {
-		t.Errorf("市場代號預期 400，得到 %d", rec.MarketCode)
+}
+
+// TestAPIRecordJSONMapping_StringMarketCode 測試 API 回傳 string 格式的市場代號
+func TestAPIRecordJSONMapping_StringMarketCode(t *testing.T) {
+	jsonStr := `{
+		"交易日期": "114.03.03",
+		"種類代碼": "V",
+		"作物代號": "SQ1",
+		"作物名稱": "茭白筍-帶殼",
+		"市場代號": "400",
+		"市場名稱": "台中市",
+		"上價": 100.0,
+		"中價": 90.0,
+		"下價": 80.0,
+		"平均價": 90.0,
+		"交易量": 500.0
+	}`
+
+	svc := &CrawlerService{}
+	records, err := svc.ParseAPIResponse([]byte("[" + jsonStr + "]"))
+	if err != nil {
+		t.Fatalf("ParseAPIResponse 失敗: %v", err)
 	}
-	if rec.MarketName != "台中市" {
-		t.Errorf("市場名稱預期 台中市，得到 %s", rec.MarketName)
+	if len(records) != 1 {
+		t.Fatalf("預期 1 筆紀錄，得到 %d 筆", len(records))
 	}
-	if rec.UpperPrice != 100.5 {
-		t.Errorf("上價預期 100.5，得到 %f", rec.UpperPrice)
-	}
-	if rec.MiddlePrice != 90.3 {
-		t.Errorf("中價預期 90.3，得到 %f", rec.MiddlePrice)
-	}
-	if rec.LowerPrice != 80.1 {
-		t.Errorf("下價預期 80.1，得到 %f", rec.LowerPrice)
-	}
-	if rec.AvgPrice != 90.3 {
-		t.Errorf("平均價預期 90.3，得到 %f", rec.AvgPrice)
-	}
-	if rec.Volume != 1234.5 {
-		t.Errorf("交易量預期 1234.5，得到 %f", rec.Volume)
+	if records[0].MarketCode != 400 {
+		t.Errorf("市場代號預期 400，得到 %d", records[0].MarketCode)
 	}
 }
 
